@@ -17,7 +17,7 @@ NUMERIC_OVERRIDES = {
     "lot_sqft": float,
     "year_built": int,
 }
-
+ 
 
 def _collect_overrides(source) -> dict:
     """Pull optional refinement fields off the results-page form."""
