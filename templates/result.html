@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}{{ r.address }} — Estimated value{% endblock %}
+
+{% block content %}
+<a class="back" href="{{ url_for('index') }}">&larr; New search</a>
+
+<header class="head">
+  <h1 class="head__addr">{{ s.address or r.address }}</h1>
+  <p class="head__meta">
+    {{ r.location.display_name }}
+    {% if r.is_off_market %}
+      <span class="tag tag--off">Off-market</span>
+    {% else %}
+      <span class="tag tag--on">On Zillow</span>
+    {% endif %}
+  </p>
+</header>
+
+<section class="card card--estimate">
+  <p class="est__label">Estimated value</p>
+  <p class="est__value">{{ e.point_estimate | money }}</p>
+  <p class="est__range">
+    Likely range <strong>{{ e.low | money }} – {{ e.high | money }}</strong>
+    <span class="dim">({{ e.spread_pct | pct(0) }} wide)</span>
+  </p>
+  <div class="est__facts">
+    <div><span class="k">Per sq ft</span><span class="v">{{ e.price_per_sqft | money }}</span></div>
+    <div><span class="k">Confidence</span>
+      <span class="v badge badge--{{ e.confidence | lower }}">{{ e.confidence }}</span></div>
+    <div><span class="k">Homes modeled</span><span class="v">{{ e.n_training }}</span></div>
+    <div><span class="k">Search radius</span><span class="v">{{ e.radius_mi | num(1) }} mi</span></div>
+  </div>
+</section>
+
+{% for w in e.warnings %}
+  <div class="alert alert--warn">{{ w }}</div>
+{% endfor %}
+
+<div class="grid">
+  <!-- Subject -->
+  <section class="card">
+    <h2 class="card__h">This home</h2>
+    <dl class="facts">
+      <div><dt>Living area</dt><dd>{{ s.sqft | num }} sq ft
+        {% if 'sqft' in s.imputed_fields %}<span class="est-tag">est.</span>{% endif %}</dd></div>
+      <div><dt>Bedrooms</dt><dd>{{ s.beds | num }}
+        {% if 'beds' in s.imputed_fields %}<span class="est-tag">est.</span>{% endif %}</dd></div>
+      <div><dt>Bathrooms</dt><dd>{{ s.baths | num(1) }}
+        {% if 'baths' in s.imputed_fields %}<span class="est-tag">est.</span>{% endif %}</dd></div>
+      <div><dt>Lot</dt><dd>{{ s.lot_sqft | num }} sq ft
+        {% if 'lot_sqft' in s.imputed_fields %}<span class="est-tag">est.</span>{% endif %}</dd></div>
+      <div><dt>Year built</dt><dd>{{ s.year_built or '—' }}
+        {% if 'year_built' in s.imputed_fields %}<span class="est-tag">est.</span>{% endif %}</dd></div>
+      <div><dt>Type</dt><dd>{{ s.home_type | replace('_', ' ') | title }}</dd></div>
+    </dl>
+
+    <details class="refine">
+      <summary>Know the real numbers? Refine the estimate</summary>
+      <form class="refine__form" action="{{ url_for('estimate') }}" method="post">
+        <input type="hidden" name="address" value="{{ r.address }}">
+        <label>Sq ft<input type="number" name="sqft" min="100" step="10" value="{{ s.sqft | round | int if s.sqft }}"></label>
+        <label>Beds<input type="number" name="beds" min="0" step="1" value="{{ s.beds | round | int if s.beds }}"></label>
+        <label>Baths<input type="number" name="baths" min="0" step="0.5" value="{{ s.baths }}"></label>
+        <label>Lot sq ft<input type="number" name="lot_sqft" min="0" step="100" value="{{ s.lot_sqft | round | int if s.lot_sqft }}"></label>
+        <label>Year built<input type="number" name="year_built" min="1700" max="2026" step="1" value="{{ s.year_built or '' }}"></label>
+        <label>Type
+          <select name="home_type">
+            {% for t in ['SINGLE_FAMILY', 'TOWNHOUSE', 'CONDO'] %}
+              <option value="{{ t }}" {{ 'selected' if s.home_type == t }}>{{ t | replace('_',' ') | title }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit">Recalculate</button>
+      </form>
+    </details>
+  </section>
+
+  <!-- Map -->
+  <section class="card">
+    <h2 class="card__h">Where the comps are</h2>
+    <svg class="map" viewBox="0 0 100 100" role="img"
+         aria-label="Map of comparable homes around the subject property">
+      <rect x="0" y="0" width="100" height="100" class="map__bg" rx="2"/>
+      {% for c in map_data.comps %}
+        <line x1="{{ map_data.subject.x }}" y1="{{ map_data.subject.y }}"
+              x2="{{ c.x }}" y2="{{ c.y }}" class="map__link"/>
+      {% endfor %}
+      {% for c in map_data.comps %}
+        <circle cx="{{ c.x }}" cy="{{ c.y }}" r="2.4"
+                class="map__comp {{ 'map__comp--sold' if c.sold }}">
+          <title>{{ c.address }} — {{ c.price | money }} ({{ c.distance_mi | num(2) }} mi)</title>
+        </circle>
+      {% endfor %}
+      <circle cx="{{ map_data.subject.x }}" cy="{{ map_data.subject.y }}" r="3.6" class="map__subject"/>
+      <text x="4" y="96" class="map__scale">~{{ map_data.scale_mi }} mi from center to edge</text>
+    </svg>
+    <p class="legend">
+      <span class="dot dot--subject"></span> This home
+      <span class="dot dot--sold"></span> Recently sold
+      <span class="dot dot--listed"></span> Currently listed
+    </p>
+  </section>
+</div>
+
+<!-- Comparables -->
+<section class="card">
+  <h2 class="card__h">
+    {{ comps | length }} comparable homes
+    {% if summary.sold_count %}<span class="dim">· {{ summary.sold_count }} recent sales</span>{% endif %}
+  </h2>
+
+  <div class="table-wrap">
+    <table class="comps">
+      <thead>
+        <tr>
+          <th>Address</th><th>Dist</th><th>Beds</th><th>Baths</th>
+          <th>Sq ft</th><th>Built</th><th>$/sq ft</th><th>Price</th><th>Match</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in comps %}
+        <tr>
+          <td class="comps__addr">
+            {% if c.url %}<a href="{{ c.url }}" target="_blank" rel="noopener noreferrer">{{ c.address }}</a>
+            {% else %}{{ c.address }}{% endif %}
+            <span class="basis basis--{{ c.price_basis }}">{{ c.price_basis }}</span>
+          </td>
+          <td>{{ c.distance_mi | num(2) }} mi</td>
+          <td>{{ c.beds | num }}</td>
+          <td>{{ c.baths | num(1) }}</td>
+          <td>{{ c.sqft | num }}</td>
+          <td>{{ c.year_built or '—' }}</td>
+          <td>{{ c.price_per_sqft | money }}</td>
+          <td class="comps__price">{{ c.price | money }}</td>
+          <td>
+            <span class="match"><span class="match__fill" style="width: {{ (c.similarity * 100) | round | int }}%"></span></span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="summary">
+    <div><span class="k">Comp price range</span>
+      <span class="v">{{ summary.price_min | money }} – {{ summary.price_max | money }}</span></div>
+    <div><span class="k">Median comp</span><span class="v">{{ summary.price_median | money }}</span></div>
+    <div><span class="k">Median $/sq ft</span><span class="v">{{ summary.ppsf_median | money }}</span></div>
+    <div><span class="k">Farthest comp</span><span class="v">{{ summary.max_distance | num(2) }} mi</span></div>
+  </div>
+</section>
+
+<!-- Price comparison -->
+<section class="card">
+  <h2 class="card__h">This home vs. its comps</h2>
+  <div class="bars">
+    {% for b in bar_data.bars %}
+    <div class="bars__row">
+      <span class="bars__label" title="{{ b.address }}">{{ b.address }}</span>
+      <span class="bars__track">
+        <span class="bars__fill {{ 'bars__fill--sold' if b.sold }}" style="width: {{ b.width }}%"></span>
+      </span>
+      <span class="bars__val">{{ b.price | money }}</span>
+    </div>
+    {% endfor %}
+    <div class="bars__row bars__row--subject">
+      <span class="bars__label"><strong>This home (estimate)</strong></span>
+      <span class="bars__track">
+        <span class="bars__band" style="left: {{ bar_data.low_x }}%; width: {{ (bar_data.high_x - bar_data.low_x) }}%"></span>
+        <span class="bars__marker" style="left: {{ bar_data.estimate_x }}%"></span>
+      </span>
+      <span class="bars__val"><strong>{{ e.point_estimate | money }}</strong></span>
+    </div>
+  </div>
+</section>
+
+<!-- Model -->
+<section class="card">
+  <h2 class="card__h">How the model decided</h2>
+  <p class="dim model__intro">
+    A random forest ({{ n_trees }} trees) was trained on the
+    {{ e.n_training }} priced homes within {{ e.radius_mi | num(1) }} miles, on a log-price
+    target with closer and recently-sold homes weighted more heavily.
+  </p>
+
+  <div class="imp">
+    {% for f in e.importances %}
+    <div class="imp__row">
+      <span class="imp__name">{{ f.feature }}</span>
+      <span class="imp__track"><span class="imp__fill" style="width: {{ (f.weight * 100) | round(1) }}%"></span></span>
+      <span class="imp__val">{{ f.weight | pct(0) }}</span>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="summary">
+    <div><span class="k">Cross-validated error</span>
+      <span class="v">{% if e.cv_mape %}{{ e.cv_mape | pct }} ({{ e.cv_mae | money }}){% else %}sample too small{% endif %}</span></div>
+    <div><span class="k">Out-of-bag R²</span>
+      <span class="v">{% if e.r2_oob is not none %}{{ e.r2_oob | round(3) }}{% else %}—{% endif %}</span></div>
+    <div><span class="k">$/sq ft benchmark</span><span class="v">{{ e.baseline_ppsf_estimate | money }}</span></div>
+    <div><span class="k">Data source</span><span class="v">{{ r.provider_name }}</span></div>
+  </div>
+
+  {% if r.provider_disclosure %}
+    <p class="disclosure">{{ r.provider_disclosure }}</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="hero">
+  <h1 class="hero__title">What's this home worth?</h1>
+  <p class="hero__sub">
+    Enter any address — including off-market homes that aren't listed. We pull the
+    nearby listings and sales, fit a random forest to them, and estimate a value.
+  </p>
+
+  {% if error %}
+    <div class="alert alert--error" role="alert">{{ error }}</div>
+  {% endif %}
+
+  <form class="search" action="{{ url_for('estimate') }}" method="post">
+    <input
+      class="search__input"
+      type="text"
+      name="address"
+      value="{{ address or '' }}"
+      placeholder="1600 Pennsylvania Ave NW, Washington, DC 20500"
+      autocomplete="street-address"
+      autofocus
+      required>
+    <button class="search__btn" type="submit">Estimate value</button>
+  </form>
+
+  <p class="hero__hint">Include city and state for the most accurate match.</p>
+
+  <ol class="steps">
+    <li><span class="steps__n">1</span> We geocode the address to a precise point.</li>
+    <li><span class="steps__n">2</span> We gather every priced home within a few miles.</li>
+    <li><span class="steps__n">3</span> A random forest learns that neighborhood's pricing.</li>
+    <li><span class="steps__n">4</span> You get a value, a range, and the comps behind it.</li>
+  </ol>
+</section>
+{% endblock %}
