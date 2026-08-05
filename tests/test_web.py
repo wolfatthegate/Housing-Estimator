@@ -60,6 +60,57 @@ def test_api_requires_address(client):
     assert client.get("/api/estimate").status_code == 400
 
 
+def test_results_page_has_the_radius_control(client):
+    body = client.post("/estimate", data={"address": ADDRESS}).get_data(as_text=True)
+    assert 'name="radius"' in body
+    assert 'min="0.1"' in body
+    assert 'max="2.0"' in body
+
+
+def test_radius_form_carries_overrides_forward(client):
+    """Changing radius must not silently discard facts the user typed."""
+    body = client.post(
+        "/estimate", data={"address": ADDRESS, "sqft": "1650", "home_type": "TOWNHOUSE"}
+    ).get_data(as_text=True)
+    assert '<input type="hidden" name="sqft" value="1650.0">' in body
+    assert '<input type="hidden" name="home_type" value="TOWNHOUSE">' in body
+
+
+def test_api_honors_radius(client):
+    for radius in (0.25, 1.0):
+        data = client.get(
+            "/api/estimate", query_string={"address": ADDRESS, "radius": radius}
+        ).get_json()
+        assert data["estimate"]["search_radius_mi"] == pytest.approx(radius)
+        assert data["estimate"]["radius_pinned"] is True
+
+
+def test_api_clamps_out_of_range_radius(client):
+    data = client.get(
+        "/api/estimate", query_string={"address": ADDRESS, "radius": 99}
+    ).get_json()
+    assert data["estimate"]["search_radius_mi"] == pytest.approx(2.0)
+
+
+def test_api_ignores_junk_radius(client):
+    data = client.get(
+        "/api/estimate", query_string={"address": ADDRESS, "radius": "wide"}
+    ).get_json()
+    assert data["estimate"]["radius_pinned"] is False
+
+
+def test_sparse_radius_returns_actionable_error(client, monkeypatch):
+    """Too few comps should explain the fix, not blow up."""
+    from zestimate import service
+
+    monkeypatch.setattr(service, "_priced_within", lambda *a, **k: [])
+    resp = client.post("/estimate", data={"address": ADDRESS, "radius": "0.1"})
+    assert resp.status_code == 404
+    body = resp.get_data(as_text=True)
+    assert "0.1 miles" in body
+    assert "Widen the search radius" in body
+
+
 def test_api_honors_overrides(client):
     base = client.get("/api/estimate", query_string={"address": ADDRESS}).get_json()
     big = client.get(

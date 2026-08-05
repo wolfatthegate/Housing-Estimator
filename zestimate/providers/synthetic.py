@@ -14,6 +14,14 @@ from .base import Property, PropertyProvider
 
 HOME_TYPES = ["SINGLE_FAMILY", "SINGLE_FAMILY", "SINGLE_FAMILY", "TOWNHOUSE", "CONDO"]
 
+#: The pool is generated once over this radius and then filtered down, which is
+#: what makes a narrower search a strict subset of a wider one.
+REFERENCE_RADIUS_MI = 2.0
+#: Pool size over that disc — about 250 priced homes per square mile, tuned so
+#: a 0.1 mi search still returns a usable handful and 2.0 mi saturates the
+#: training cap.
+POOL_SIZE = 3200
+
 STREETS = [
     "Maple Ave", "Oak St", "Cedar Ln", "Birch Ct", "Willow Dr", "Chestnut St",
     "Sycamore Way", "Juniper Rd", "Aspen Ct", "Magnolia Dr", "Hawthorn Ln",
@@ -53,6 +61,9 @@ class SyntheticProvider(PropertyProvider):
 
     def _make_home(self, rng, point, ppsf, idx, radius_mi):
         # Uniform-in-area sampling so homes aren't clumped at the center.
+        # Positions are drawn against the fixed reference radius, never the
+        # requested one, so narrowing the search returns a strict subset of the
+        # same homes rather than a freshly scattered set.
         r = radius_mi * math.sqrt(rng.random())
         theta = rng.uniform(0, 2 * math.pi)
         lat = point.lat + miles_to_deg_lat(r * math.sin(theta))
@@ -120,6 +131,25 @@ class SyntheticProvider(PropertyProvider):
         return None
 
     def fetch_nearby(self, point: GeoPoint, radius_mi: float, limit: int) -> list:
+        """Homes within `radius_mi`, drawn from one fixed neighborhood pool.
+
+        The pool is always generated over REFERENCE_RADIUS_MI and then filtered,
+        so the comp count falls with area the way a real market does and a
+        tighter radius is a subset of a looser one.
+        """
         rng, ppsf = self._market(point)
-        n = min(limit, max(40, int(28 * radius_mi)))
-        return [self._make_home(rng, point, ppsf, i, radius_mi) for i in range(n)]
+        reference = max(REFERENCE_RADIUS_MI, radius_mi)
+        pool = [
+            self._make_home(rng, point, ppsf, i, reference)
+            for i in range(POOL_SIZE)
+        ]
+        within = [h for h in pool if h.distance_mi <= radius_mi]
+        within.sort(key=lambda h: h.distance_mi)
+        if len(within) <= limit:
+            return within
+        # Over the cap, take an even stride through the distance-sorted list
+        # rather than the closest `limit`. Truncating to the nearest would make
+        # every radius above ~0.9 mi collapse to the same comp set, silently
+        # ignoring the radius the user asked for.
+        stride = len(within) / limit
+        return [within[int(i * stride)] for i in range(limit)]

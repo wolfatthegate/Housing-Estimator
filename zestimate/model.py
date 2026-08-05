@@ -52,6 +52,7 @@ FIELD_LABELS = {
     "baths": "bathroom count",
     "lot_sqft": "lot size",
     "year_built": "year built",
+    "home_type": "home type",
 }
 
 
@@ -121,6 +122,25 @@ def neighborhood_profile(comps: list) -> dict:
     }
 
 
+def dominant_home_type(comps: list, near_count: int = 15) -> str:
+    """Most common home type among the closest comps.
+
+    Assuming SINGLE_FAMILY for every unknown home badly overprices a condo or
+    townhouse, since those trade at a different price per square foot. The
+    immediate neighbors are the best available prior — and the user can still
+    override it on the results page.
+    """
+    nearest = sorted(comps, key=lambda c: c.distance_mi)[:near_count]
+    counts = {}
+    for comp in nearest:
+        key = (comp.home_type or "").upper()
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    if not counts:
+        return "SINGLE_FAMILY"
+    return max(counts.items(), key=lambda kv: kv[1])[0]
+
+
 def synthesize_subject(address: str, point: GeoPoint, comps: list) -> Property:
     """Build a stand-in subject from neighborhood medians.
 
@@ -138,14 +158,42 @@ def synthesize_subject(address: str, point: GeoPoint, comps: list) -> Property:
         sqft=prof["sqft"],
         lot_sqft=prof["lot_sqft"],
         year_built=int(prof["year_built"]) if prof["year_built"] else None,
-        home_type="SINGLE_FAMILY",
+        home_type=dominant_home_type(comps),
         price_basis="off-market",
     )
     subject.imputed_fields = [
-        f for f in ("beds", "baths", "sqft", "lot_sqft", "year_built")
+        f for f in ("beds", "baths", "sqft", "lot_sqft", "year_built", "home_type")
         if getattr(subject, f) is not None
     ]
     return subject
+
+
+def reimpute_for_type(subject: Property, comps: list, min_same: int = 3) -> Property:
+    """Re-derive still-imputed facts from comps of the subject's own type.
+
+    Without this, telling the app "it's a townhouse" changes almost nothing: the
+    size and lot were imputed from a street of single-family homes, so the model
+    still sees a big house on a big lot. Townhouses and condos differ from
+    single-family homes mostly in square footage and land, not in a per-type
+    price premium, so those are the fields that have to move.
+
+    Returns `(subject, matched)`. `matched` is False when the neighborhood held
+    too few homes of this type to form a stable median, in which case the
+    all-comps medians stand — the caller should say so rather than show, say, a
+    townhouse sitting on a single-family lot.
+    """
+    want = (subject.home_type or "").upper()
+    same = [c for c in comps if (c.home_type or "").upper() == want]
+    if len(same) < min_same:
+        return subject, False
+
+    prof = neighborhood_profile(same)
+    for field_name in ("sqft", "beds", "baths", "lot_sqft"):
+        if field_name in subject.imputed_fields and prof[field_name] is not None:
+            setattr(subject, field_name, prof[field_name])
+    if "year_built" in subject.imputed_fields and prof["year_built"]:
+        subject.year_built = int(prof["year_built"])
+    return subject, True
 
 
 def fill_missing(subject: Property, comps: list) -> Property:

@@ -110,6 +110,28 @@ body {
 .badge--moderate { background: var(--warn-bg); color: #9a7414; border: 1px solid var(--warn-line); }
 .badge--low { background: var(--err-bg); color: #b4433f; border: 1px solid var(--err-line); }
 
+/* ---------- Radius control ---------- */
+.radius {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 14px 20px; margin-bottom: 18px;
+}
+.radius__label { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-dim); font-weight: 700; }
+.radius__input {
+  width: 84px; padding: 8px 10px; font-size: 16px; font-weight: 600;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--ink); font-variant-numeric: tabular-nums;
+}
+.radius__input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.radius__unit { font-size: 14px; color: var(--ink-dim); margin-left: -4px; }
+.radius__btn {
+  padding: 9px 16px; border: 0; border-radius: 8px; background: var(--accent);
+  color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.radius__btn:hover { filter: brightness(1.08); }
+.radius__hint { flex: 1 1 260px; font-size: 12px; color: var(--ink-dim); line-height: 1.4; }
+
 .alert { padding: 12px 16px; border-radius: 10px; font-size: 14px; margin-bottom: 14px; }
 .alert--warn { background: var(--warn-bg); border: 1px solid var(--warn-line); }
 .alert--error { background: var(--err-bg); border: 1px solid var(--err-line); text-align: left; }

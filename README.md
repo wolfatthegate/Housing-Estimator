@@ -6,7 +6,7 @@ recent sales.
 
 The home page is a single text box. Everything else is derived.
 
-![python](https://img.shields.io/badge/python-3.10%2B-blue) ![model](https://img.shields.io/badge/model-RandomForest-green) ![tests](https://img.shields.io/badge/tests-28%20passing-brightgreen)
+![python](https://img.shields.io/badge/python-3.10%2B-blue) ![model](https://img.shields.io/badge/model-RandomForest-green) ![tests](https://img.shields.io/badge/tests-61%20passing-brightgreen)
 
 ---
 
@@ -93,8 +93,9 @@ the location as inexact rather than failing.
 ## How the estimate is produced
 
 1. **Geocode** the address to a lat/lon.
-2. **Gather** every priced home within `SEARCH_RADIUS_MI` (2 mi default). If
-   fewer than 12 come back, the radius doubles until it hits 8 miles.
+2. **Gather** every priced home within the search radius. Left alone, this
+   starts at 2 mi and doubles (to a max of 8) until at least 12 homes come back.
+   **Set the radius yourself and it is honored exactly** — see below.
 3. **Resolve the subject.** If the home is on the market, its facts come from
    the provider. If it's off-market — the case this app is built for — the
    facts are imputed from neighborhood medians and flagged `est.` in the UI.
@@ -124,6 +125,42 @@ and it makes the result explainable — the comps shown *are* the training data.
   benchmark. If the forest diverges more than 2× in either direction, the page
   says so instead of quietly reporting a bad number.
 
+### Search radius
+
+The results page carries a **search radius control, adjustable from 0.1 to 2.0
+miles** in 0.05 mi steps. Out-of-range values are clamped rather than rejected.
+
+A radius you set is **pinned**: auto-widening is switched off entirely, even if
+that leaves a thin sample. Widening anyway would make the control meaningless —
+you would ask for 0.3 mi and silently get 8. When the pinned radius holds fewer
+than 3 priced homes the page says so and tells you to widen, rather than
+inventing a number; between 3 and 12 it estimates but drops confidence to "Low"
+and warns.
+
+Tighter is usually more accurate — comps down the street beat comps across a
+highway — but it is a real trade-off against sample size, which is why both the
+homes-modeled count and the cross-validated error are on the page next to the
+estimate.
+
+### Home type
+
+Home type materially changes value, and it is the most common source of a
+too-high estimate on an off-market home. Two safeguards:
+
+- For an unlisted home the type is inferred from the **most common type among
+  the 15 nearest comps**, not assumed to be single-family.
+- Overriding the type in the *Refine* panel **re-derives square footage, lot,
+  beds and baths from comps of that type only.** Without this, setting
+  "townhouse" barely moves the number: the size and lot were imputed from
+  single-family neighbors, so the model still sees a big house on a big lot.
+  With it, a townhouse comes in roughly 9% below the single-family estimate and
+  a condo roughly 28% below, driven mostly by floor area and land rather than a
+  per-type premium.
+
+If the radius is too tight to hold enough homes of that type, the app falls back
+to all-home medians **and tells you it did** — otherwise you would see a
+townhouse sitting on an 11,000 sq ft lot with no explanation.
+
 ### Comparable selection
 
 The forest trains on *everything* in radius; the table shows the handful worth
@@ -141,8 +178,15 @@ curl "http://127.0.0.1:5000/api/estimate?address=410+Terry+Ave+N,+Seattle,+WA+98
 
 Returns the subject, the estimate with its range and accuracy metrics, feature
 importances, and the full comparable set as JSON. Accepts the same optional
-refinement parameters as the web form (`sqft`, `beds`, `baths`, `lot_sqft`,
-`year_built`, `home_type`).
+refinement parameters as the web form (`radius`, `sqft`, `beds`, `baths`,
+`lot_sqft`, `year_built`, `home_type`):
+
+```bash
+curl "http://127.0.0.1:5000/api/estimate?address=410+Terry+Ave+N,+Seattle,+WA+98109&radius=0.5&home_type=TOWNHOUSE"
+```
+
+`estimate.radius_pinned` reports whether the radius was yours or chosen
+automatically.
 
 ---
 
@@ -163,7 +207,7 @@ zestimate/
     rapidapi.py              Live licensed-API provider
 templates/                   base / index / result
 static/style.css             Light + dark, no JS, no CDN
-tests/                       28 tests
+tests/                       61 tests
 ```
 
 The results page has no JavaScript and no external requests — the map and charts
@@ -179,8 +223,11 @@ All optional; see `.env.example` for the full list with defaults.
 |---|---|---|
 | `ZESTIMATE_PROVIDER` | `auto` | `auto`, `rapidapi`, or `synthetic` |
 | `RAPIDAPI_KEY` | — | Enables live data |
-| `SEARCH_RADIUS_MI` | `2.0` | Initial comp search radius |
-| `MIN_TRAINING_ROWS` | `12` | Below this, the radius expands |
+| `SEARCH_RADIUS_MI` | `2.0` | Initial radius when not pinned by the user |
+| `MIN_USER_RADIUS_MI` | `0.1` | Floor of the radius control |
+| `MAX_USER_RADIUS_MI` | `2.0` | Ceiling of the radius control |
+| `RADIUS_STEP_MI` | `0.05` | Increment of the radius control |
+| `MIN_TRAINING_ROWS` | `12` | Below this, an *unpinned* radius expands |
 | `N_COMPS_SHOWN` | `8` | Comps displayed (spec range: 5–10) |
 | `MAX_SEARCH_RADIUS_MI` | `8.0` | Hard stop on radius expansion |
 | `MAX_TRAINING_ROWS` | `250` | Cap on homes fed to the forest |

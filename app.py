@@ -5,7 +5,7 @@ from flask import Flask, jsonify, render_template, request
 from zestimate import config
 from zestimate.geo import GeocodeError
 from zestimate.model import NotEnoughData
-from zestimate.service import value_address
+from zestimate.service import clamp_radius, value_address
 from zestimate.viz import build_map_points, build_price_bars
 
 app = Flask(__name__)
@@ -38,6 +38,17 @@ def _collect_overrides(source) -> dict:
     return out
 
 
+def _collect_radius(source):
+    """Parse the optional radius control; None means 'choose automatically'."""
+    raw = (source.get("radius") or "").strip()
+    if not raw:
+        return None
+    try:
+        return clamp_radius(float(raw))
+    except (TypeError, ValueError):
+        return None
+
+
 @app.route("/", methods=["GET"])
 def index():
     return render_template("index.html")
@@ -52,7 +63,11 @@ def estimate():
         return render_template("index.html", error="Enter an address to get started."), 400
 
     try:
-        report = value_address(address, overrides=_collect_overrides(source))
+        report = value_address(
+            address,
+            overrides=_collect_overrides(source),
+            radius_mi=_collect_radius(source),
+        )
     except GeocodeError as exc:
         return render_template("index.html", error=str(exc), address=address), 400
     except NotEnoughData as exc:
@@ -75,6 +90,9 @@ def estimate():
         map_data=build_map_points(report.subject, report.comps),
         bar_data=build_price_bars(report.estimate, report.comps),
         n_trees=config.RF_N_ESTIMATORS,
+        radius_min=config.MIN_USER_RADIUS_MI,
+        radius_max=config.MAX_USER_RADIUS_MI,
+        radius_step=config.RADIUS_STEP_MI,
     )
 
 
@@ -85,7 +103,11 @@ def api_estimate():
     if not address:
         return jsonify({"error": "address is required"}), 400
     try:
-        report = value_address(address, overrides=_collect_overrides(request.args))
+        report = value_address(
+            address,
+            overrides=_collect_overrides(request.args),
+            radius_mi=_collect_radius(request.args),
+        )
     except (GeocodeError, NotEnoughData) as exc:
         return jsonify({"error": str(exc)}), 404
     except Exception as exc:  # noqa: BLE001
@@ -111,6 +133,7 @@ def api_estimate():
             "oob_r2": e.r2_oob,
             "training_homes": e.n_training,
             "search_radius_mi": e.radius_mi,
+            "radius_pinned": report.radius_pinned,
             "feature_importances": e.importances,
             "warnings": e.warnings,
         },

@@ -42,6 +42,13 @@ HTTP_TIMEOUT = _float("HTTP_TIMEOUT", 15.0)
 # --- Comparable selection --------------------------------------------------
 SEARCH_RADIUS_MI = _float("SEARCH_RADIUS_MI", 2.0)
 MAX_SEARCH_RADIUS_MI = _float("MAX_SEARCH_RADIUS_MI", 8.0)
+
+# Bounds for the user-facing radius control on the results page. A pinned
+# radius is honored exactly — auto-widening is disabled — so these are the
+# real limits on how tight a comp set the user can ask for.
+MIN_USER_RADIUS_MI = _float("MIN_USER_RADIUS_MI", 0.1)
+MAX_USER_RADIUS_MI = _float("MAX_USER_RADIUS_MI", 2.0)
+RADIUS_STEP_MI = _float("RADIUS_STEP_MI", 0.05)
 MIN_TRAINING_ROWS = _int("MIN_TRAINING_ROWS", 12)
 MAX_TRAINING_ROWS = _int("MAX_TRAINING_ROWS", 250)
 N_COMPS_SHOWN = _int("N_COMPS_SHOWN", 8)  # spec asks for 5-10

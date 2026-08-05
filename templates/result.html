@@ -32,6 +32,26 @@
   </div>
 </section>
 
+<form class="radius" action="{{ url_for('estimate') }}" method="post">
+  <input type="hidden" name="address" value="{{ r.address }}">
+  {# Carry forward only facts the user typed, so medians re-derive at the new radius. #}
+  {% for key, value in r.applied_overrides.items() %}
+    <input type="hidden" name="{{ key }}" value="{{ value }}">
+  {% endfor %}
+  <label class="radius__label" for="radius">Search radius</label>
+  <input class="radius__input" id="radius" type="number" name="radius"
+         min="{{ radius_min }}" max="{{ radius_max }}" step="{{ radius_step }}"
+         value="{{ [e.radius_mi, radius_max] | min }}">
+  <span class="radius__unit">mi</span>
+  <button class="radius__btn" type="submit">Update comps</button>
+  <span class="radius__hint">
+    {{ radius_min }}–{{ radius_max }} mi.
+    {%- if r.radius_pinned %} Pinned by you — no auto-widening.
+    {%- else %} Chosen automatically to reach enough sales.{% endif %}
+    Tighter comps are more similar, but too tight leaves too few to model.
+  </span>
+</form>
+
 {% for w in e.warnings %}
   <div class="alert alert--warn">{{ w }}</div>
 {% endfor %}
@@ -51,7 +71,8 @@
         {% if 'lot_sqft' in s.imputed_fields %}<span class="est-tag">est.</span>{% endif %}</dd></div>
       <div><dt>Year built</dt><dd>{{ s.year_built or '—' }}
         {% if 'year_built' in s.imputed_fields %}<span class="est-tag">est.</span>{% endif %}</dd></div>
-      <div><dt>Type</dt><dd>{{ s.home_type | replace('_', ' ') | title }}</dd></div>
+      <div><dt>Type</dt><dd>{{ s.home_type | replace('_', ' ') | title }}
+        {% if 'home_type' in s.imputed_fields %}<span class="est-tag">est.</span>{% endif %}</dd></div>
     </dl>
 
     <details class="refine">
