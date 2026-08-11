@@ -39,6 +39,12 @@ GEOCODER_USER_AGENT = os.environ.get(
 )
 HTTP_TIMEOUT = _float("HTTP_TIMEOUT", 15.0)
 
+# USPS Addresses API (OAuth2 client credentials). Without both of these set,
+# address verification is skipped and every address is treated as valid.
+USPS_CLIENT_ID = os.environ.get("USPS_CLIENT_ID", "").strip()
+USPS_CLIENT_SECRET = os.environ.get("USPS_CLIENT_SECRET", "").strip()
+USPS_BASE_URL = os.environ.get("USPS_BASE_URL", "https://apis.usps.com").strip()
+
 # --- Comparable selection --------------------------------------------------
 SEARCH_RADIUS_MI = _float("SEARCH_RADIUS_MI", 2.0)
 MAX_SEARCH_RADIUS_MI = _float("MAX_SEARCH_RADIUS_MI", 8.0)

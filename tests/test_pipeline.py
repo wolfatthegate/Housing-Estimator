@@ -9,12 +9,14 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("ZESTIMATE_PROVIDER", "synthetic")
 
-from zestimate import model  # noqa: E402
+from zestimate import model, usps  # noqa: E402
 from zestimate.comps import select_comps, similarity  # noqa: E402
 from zestimate.geo import GeoPoint, _parse_locality, haversine_mi  # noqa: E402
 from zestimate.providers import get_provider  # noqa: E402
 from zestimate.providers.base import Property  # noqa: E402
 from zestimate.service import value_address  # noqa: E402
+from zestimate import service  # noqa: E402
+from zestimate.usps import AddressNotFoundError  # noqa: E402
 from zestimate.viz import build_map_points, build_price_bars  # noqa: E402
 
 ADDRESS = "742 Evergreen Terrace, Springfield, IL 62704"
@@ -44,6 +46,26 @@ def test_haversine_zero():
 ])
 def test_parse_locality(raw, expected):
     assert _parse_locality(raw) == expected
+
+
+# --- usps --------------------------------------------------------------
+
+def test_verify_address_skips_without_credentials(monkeypatch):
+    monkeypatch.setattr(usps.config, "USPS_CLIENT_ID", "")
+    monkeypatch.setattr(usps.config, "USPS_CLIENT_SECRET", "")
+    assert usps.verify_address(ADDRESS) is True
+
+
+def test_verify_address_rejects_blank_street(monkeypatch):
+    monkeypatch.setattr(usps.config, "USPS_CLIENT_ID", "test-id")
+    monkeypatch.setattr(usps.config, "USPS_CLIENT_SECRET", "test-secret")
+    assert usps.verify_address("   ") is False
+
+
+def test_value_address_rejects_when_usps_says_invalid(monkeypatch):
+    monkeypatch.setattr(service, "verify_address", lambda addr: False)
+    with pytest.raises(AddressNotFoundError, match="Address not valid"):
+        value_address(ADDRESS)
 
 
 # --- provider --------------------------------------------------------------

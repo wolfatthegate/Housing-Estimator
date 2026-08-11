@@ -7,6 +7,7 @@ from .comps import comps_summary, select_comps
 from .geo import GeoPoint, geocode
 from .providers import get_provider
 from .providers.base import Property
+from .usps import AddressNotFoundError, verify_address
 
 
 @dataclass
@@ -44,6 +45,9 @@ def value_address(address: str, overrides: dict | None = None,
     `overrides` lets the results page refine imputed facts (sqft, beds, ...)
     without changing the single-textbox home page.
     """
+    if not verify_address(address):
+        raise AddressNotFoundError("Address not valid. Please enter valid address")
+
     point = geocode(address)
     provider = get_provider(provider_name)
 

@@ -6,6 +6,7 @@ from zestimate import config
 from zestimate.geo import GeocodeError
 from zestimate.model import NotEnoughData
 from zestimate.service import value_address
+from zestimate.usps import AddressNotFoundError
 from zestimate.viz import build_map_points, build_price_bars
 
 app = Flask(__name__)
@@ -53,6 +54,8 @@ def estimate():
 
     try:
         report = value_address(address, overrides=_collect_overrides(source))
+    except AddressNotFoundError as exc:
+        return render_template("index.html", error=str(exc), address=address), 400
     except GeocodeError as exc:
         return render_template("index.html", error=str(exc), address=address), 400
     except NotEnoughData as exc:
@@ -86,6 +89,8 @@ def api_estimate():
         return jsonify({"error": "address is required"}), 400
     try:
         report = value_address(address, overrides=_collect_overrides(request.args))
+    except AddressNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 400
     except (GeocodeError, NotEnoughData) as exc:
         return jsonify({"error": str(exc)}), 404
     except Exception as exc:  # noqa: BLE001
