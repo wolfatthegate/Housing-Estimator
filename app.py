@@ -22,7 +22,7 @@ NUMERIC_OVERRIDES = {
 
 def _collect_overrides(source) -> dict:
     """Pull optional refinement fields off the results-page form."""
-    out = {}
+    out = {} 
     for key, cast in NUMERIC_OVERRIDES.items():
         raw = (source.get(key) or "").strip() if hasattr(source, "get") else ""
         if not raw:
