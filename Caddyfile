@@ -1,0 +1,10 @@
+# Caddy provisions and renews Let's Encrypt certificates automatically, so
+# long as ports 80 and 443 are reachable and the DNS records point here.
+{
+	email waylon.luo@gmail.com
+}
+
+wolfatthegate.com, www.wolfatthegate.com {
+	reverse_proxy app:8000
+	encode gzip
+}

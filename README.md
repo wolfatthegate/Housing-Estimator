@@ -164,6 +164,10 @@ zestimate/
 templates/                   base / index / result
 static/style.css             Light + dark, no JS, no CDN
 tests/                       28 tests
+Dockerfile                   Production image (gunicorn)
+docker-compose.yml           App + Caddy, persistent cache volume
+Caddyfile                    TLS + reverse proxy for wolfatthegate.com
+.github/workflows/deploy.yml Redeploy on push to main
 ```
 
 The results page has no JavaScript and no external requests — the map and charts
@@ -190,6 +194,69 @@ All optional; see `.env.example` for the full list with defaults.
 | `FLASK_PORT` | `5000` | Change this on macOS — see above |
 | `FLASK_HOST` | `127.0.0.1` | Set `0.0.0.0` to expose on your network |
 | `FLASK_DEBUG` | `0` | `1` enables auto-reload |
+
+---
+
+## Deployment
+
+Live at <https://wolfatthegate.com>, on a single EC2 instance. Pushing to `main`
+rebuilds and restarts it — there is nothing to run by hand.
+
+**This app cannot go on GitHub Pages.** Pages serves static files only, and every
+request here geocodes an address, calls out to USPS and RapidAPI, and trains a
+random forest before rendering. It needs a Python process and a place to keep
+secrets.
+
+### Why EC2 rather than a serverless platform
+
+Two properties of the app decide this:
+
+- `geo.py` caches geocodes on disk and sleeps to honor Nominatim's ~1 req/s
+  limit. Ephemeral containers throw that cache away on every deploy and rotate
+  outbound IPs, which is exactly what a rate limiter punishes.
+- Training 400 trees per request is CPU-bound, so a cold start on a
+  scale-to-zero platform lands on the user as a multi-second wait.
+
+A small always-on box with a real disk sidesteps both.
+
+### One-time setup
+
+1. **Launch** a `t3.micro` (free tier) with Amazon Linux 2023, and allocate an
+   Elastic IP so the address survives a stop/start. Open ports 22, 80, and 443.
+2. **Install Docker and clone**, over SSH:
+
+   ```bash
+   sudo dnf install -y docker git
+   sudo systemctl enable --now docker
+   sudo usermod -aG docker ec2-user   # log out and back in
+   git clone https://github.com/wolfatthegate/Zillow-Estimate.git ~/Housing-Estimator
+   ```
+
+3. **Write `~/Housing-Estimator/.env`** on the instance from `.env.example`.
+   It is gitignored and never enters the image — `docker-compose.yml` reads it
+   at runtime. This is the only copy of your secrets.
+4. **Point DNS** at the Elastic IP: `A` records for `wolfatthegate.com` and
+   `www`. Caddy then issues the certificates itself on first boot; there is no
+   ACM or load balancer in this setup.
+5. **Add GitHub secrets** under Settings → Secrets → Actions: `EC2_HOST` (the
+   Elastic IP), `EC2_USER` (`ec2-user`), and `EC2_SSH_KEY` (the full private
+   key). Then `docker compose up -d --build` once by hand to verify.
+
+### Notes
+
+`t3.micro` has 1 GB of RAM, and numpy plus scikit-learn are most of it. Add swap
+before the first build or the image build can be OOM-killed:
+
+```bash
+sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+Gunicorn runs **one worker with four threads** on purpose. The Nominatim
+throttle in `geo.py` is a module-level global, so a second worker process would
+be a second unsynchronized rate limiter. Raise `--threads` for concurrency;
+raising `--workers` needs a shared throttle first.
 
 ---
 
