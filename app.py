@@ -1,5 +1,7 @@
 """Flask front end: one text box in, a comp-backed valuation out."""
 
+from datetime import datetime
+
 from flask import Flask, jsonify, render_template, request
 
 from zestimate import config
@@ -22,7 +24,7 @@ NUMERIC_OVERRIDES = {
 
 def _collect_overrides(source) -> dict:
     """Pull optional refinement fields off the results-page form."""
-    out = {}
+    out = {} 
     for key, cast in NUMERIC_OVERRIDES.items():
         raw = (source.get(key) or "").strip() if hasattr(source, "get") else ""
         if not raw:
@@ -126,6 +128,12 @@ def api_estimate():
             "disclosure": report.provider_disclosure,
         },
     })
+
+
+@app.context_processor
+def inject_year():
+    """The footer copyright year, so it never goes stale in the template."""
+    return {"year": datetime.now().year}
 
 
 @app.template_filter("money")

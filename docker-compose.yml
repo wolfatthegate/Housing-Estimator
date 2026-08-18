@@ -1,0 +1,32 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      # Absent on a first boot before you've written it; the app falls back to
+      # the offline synthetic provider rather than refusing to start.
+      - path: .env
+        required: false
+    volumes:
+      # Persist the geocode cache across deploys so we don't re-hit Nominatim.
+      - cache:/app/.cache
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  cache:
+  caddy_data:
+  caddy_config:

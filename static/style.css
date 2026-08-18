@@ -196,3 +196,4 @@ body {
 
 .foot { max-width: 1040px; margin: 0 auto; padding: 20px; text-align: center; }
 .foot p { color: var(--ink-dim); font-size: 12px; margin: 0; }
+.foot .copyright { margin-top: 8px; }
