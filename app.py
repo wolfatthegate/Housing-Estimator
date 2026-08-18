@@ -1,5 +1,7 @@
 """Flask front end: one text box in, a comp-backed valuation out."""
 
+from datetime import datetime
+
 from flask import Flask, jsonify, render_template, request
 
 from zestimate import config
@@ -126,6 +128,12 @@ def api_estimate():
             "disclosure": report.provider_disclosure,
         },
     })
+
+
+@app.context_processor
+def inject_year():
+    """The footer copyright year, so it never goes stale in the template."""
+    return {"year": datetime.now().year}
 
 
 @app.template_filter("money")
