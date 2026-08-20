@@ -109,6 +109,10 @@
     {% if summary.sold_count %}<span class="dim">· {{ summary.sold_count }} recent sales</span>{% endif %}
   </h2>
 
+  {% if trend_note %}
+  <p class="trend-note">{{ trend_note }}</p>
+  {% endif %}
+
   <div class="table-wrap">
     <table class="comps">
       <thead>
@@ -124,6 +128,13 @@
             {% if c.url %}<a href="{{ c.url }}" target="_blank" rel="noopener noreferrer">{{ c.address }}</a>
             {% else %}{{ c.address }}{% endif %}
             <span class="basis basis--{{ c.price_basis }}">{{ c.price_basis }}</span>
+            {% if c.sale_history | length > 1 %}
+            <span class="hist">Sold
+              {%- for h in c.sale_history[:3] %}
+                {{ ' ' }}{{ h.date[:4] }} {{ h.price | money }}{{ ',' if not loop.last }}
+              {%- endfor %}
+            </span>
+            {% endif %}
           </td>
           <td>{{ c.distance_mi | num(2) }} mi</td>
           <td>{{ c.beds | num }}</td>
@@ -131,7 +142,13 @@
           <td>{{ c.sqft | num }}</td>
           <td>{{ c.year_built or '—' }}</td>
           <td>{{ c.price_per_sqft | money }}</td>
-          <td class="comps__price">{{ c.price | money }}</td>
+          <td class="comps__price">{{ c.price | money }}
+            {% if c.is_time_adjusted %}
+            <span class="adj" title="Sold {{ c.sold_date }} for {{ c.original_price | money }}; restated in today's dollars">
+              was {{ c.original_price | money }}
+            </span>
+            {% endif %}
+          </td>
           <td>
             <span class="match"><span class="match__fill" style="width: {{ (c.similarity * 100) | round | int }}%"></span></span>
           </td>

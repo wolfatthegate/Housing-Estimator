@@ -163,6 +163,12 @@ body {
 .comps__addr a { color: var(--accent); text-decoration: none; }
 .comps__addr a:hover { text-decoration: underline; }
 .comps__price { font-weight: 700; }
+.hist { display: block; margin-top: 3px; font-size: 11px; color: var(--ink-dim); font-weight: 400; }
+.adj { display: block; margin-top: 2px; font-size: 11px; color: var(--ink-dim); font-weight: 400; }
+.trend-note {
+  margin: 0 0 14px; padding: 9px 13px; border-radius: 8px;
+  background: var(--accent-soft); color: var(--ink-dim); font-size: 13px;
+}
 
 .basis { display: inline-block; margin-left: 7px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 4px; }
 .basis--sold { background: rgba(18, 133, 92, .13); color: var(--sold); }

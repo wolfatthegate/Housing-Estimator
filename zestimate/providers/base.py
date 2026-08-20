@@ -31,6 +31,14 @@ class Property:
     similarity: float = 0.0
     # Names of fields imputed rather than reported by the source.
     imputed_fields: list = field(default_factory=list)
+    #: Prior transactions, newest first. Each: {"date", "price", "event"}.
+    #: Providers that expose no history simply leave this empty.
+    sale_history: list = field(default_factory=list)
+    #: What `price` was before trends.apply restated it in today's dollars.
+    #: None means the price is as-reported.
+    original_price: Optional[float] = None
+    #: The multiplier that restatement applied; 1.0 when untouched.
+    time_adjust_factor: float = 1.0
 
     @property
     def price_per_sqft(self) -> Optional[float]:
@@ -44,6 +52,15 @@ class Property:
             return max(0, 2026 - int(self.year_built))
         return None
 
+    @property
+    def is_time_adjusted(self) -> bool:
+        return self.original_price is not None
+
+    @property
+    def earlier_sales(self) -> list:
+        """History entries before the sale that set `price`, for display."""
+        return [h for h in self.sale_history if h.get("date", "") < (self.sold_date or "9999")]
+
     def set_distance_from(self, point: GeoPoint) -> "Property":
         self.distance_mi = haversine_mi(point.lat, point.lon, self.lat, self.lon)
         return self
@@ -52,6 +69,7 @@ class Property:
         d = asdict(self)
         d["price_per_sqft"] = self.price_per_sqft
         d["age"] = self.age
+        d["is_time_adjusted"] = self.is_time_adjusted
         return d
 
 

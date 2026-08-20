@@ -4,7 +4,7 @@ from datetime import datetime
 
 from flask import Flask, jsonify, render_template, request
 
-from zestimate import config
+from zestimate import config, trends
 from zestimate.geo import GeocodeError
 from zestimate.model import NotEnoughData
 from zestimate.service import value_address
@@ -80,6 +80,7 @@ def estimate():
         map_data=build_map_points(report.subject, report.comps),
         bar_data=build_price_bars(report.estimate, report.comps),
         n_trees=config.RF_N_ESTIMATORS,
+        trend_note=trends.describe(report.price_trend),
     )
 
 
@@ -127,6 +128,11 @@ def api_estimate():
             "provider": report.provider_name,
             "disclosure": report.provider_disclosure,
         },
+        "price_trend": {
+            "annual_pct": round(report.price_trend.annual_pct, 4),
+            "matched_pairs": report.price_trend.n_pairs,
+            "as_of": report.price_trend.as_of.isoformat(),
+        } if report.price_trend else None,
     })
 
 
