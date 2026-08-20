@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from . import config, model
+from . import config, model, trends
 from .comps import comps_summary, select_comps
 from .geo import GeoPoint, geocode
 from .providers import get_provider
@@ -21,6 +21,8 @@ class ValuationReport:
     provider_name: str
     provider_disclosure: str
     is_off_market: bool
+    #: The repeat-sales index applied to the comps, or None when not applied.
+    price_trend: trends.PriceTrend | None = None
 
 
 def _widen_until_enough(provider, point: GeoPoint) -> tuple:
@@ -58,6 +60,11 @@ def value_address(address: str, overrides: dict | None = None,
             "address, or a more complete one including city, state and ZIP."
         )
 
+    # Restate old sale prices in today's dollars before anything reads them,
+    # so the model, the comps table and the summary all agree on one number.
+    trend = trends.build_index(candidates)
+    trends.apply(candidates, trend)
+
     subject = provider.fetch_subject(address, point)
     is_off_market = subject is None or not subject.price
 
@@ -94,4 +101,5 @@ def value_address(address: str, overrides: dict | None = None,
         provider_name=provider.name,
         provider_disclosure=provider.disclosure,
         is_off_market=is_off_market,
+        price_trend=trend,
     )

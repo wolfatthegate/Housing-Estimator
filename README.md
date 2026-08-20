@@ -6,7 +6,7 @@ recent sales.
 
 The home page is a single text box. Everything else is derived.
 
-![python](https://img.shields.io/badge/python-3.10%2B-blue) ![model](https://img.shields.io/badge/model-RandomForest-green) ![tests](https://img.shields.io/badge/tests-28%20passing-brightgreen)
+![python](https://img.shields.io/badge/python-3.10%2B-blue) ![model](https://img.shields.io/badge/model-RandomForest-green) ![tests](https://img.shields.io/badge/tests-68%20passing-brightgreen)
 
 ---
 
@@ -64,23 +64,73 @@ pkill -f "Python app.py"
 
 **Zillow has no public API, and scraping zillow.com violates their Terms of
 Service** (and is actively bot-blocked). So this app never touches zillow.com
-directly. Instead it defines a provider interface and ships two implementations:
+directly. Instead it defines a provider interface and ships three
+implementations:
 
 | Provider | When it's used | What you get |
 |---|---|---|
 | `synthetic` | No API key present (the default) | A deterministic, simulated neighborhood. Realistic *shape*, fabricated *numbers*. Great for development and for evaluating the model pipeline. |
+| `rentcast` | `RENTCAST_API_KEY` is set | Public records and tax assessor filings: **recorded sale prices**, including homes that were never listed. |
 | `rapidapi` | `RAPIDAPI_KEY` is set | Real listings and recent sales through a licensed third-party Zillow data API. |
 
-To use live data, get a key for a Zillow data API on RapidAPI, then:
+`auto` picks the first of those that has a key, preferring `rentcast`.
+
+To use live data, copy the example env file and add one key:
 
 ```bash
-cp .env.example .env    # add RAPIDAPI_KEY=your_key_here
+cp .env.example .env    # add RENTCAST_API_KEY=... or RAPIDAPI_KEY=...
 ```
+
+### Why RentCast is preferred over a listings API
+
+`build_features` scores a sold price above an asking price — `sold` weighs
+`1.0`, `listed` `0.72`, `estimate` `0.5` — and `is_sold` is a model feature in
+its own right. A listings API mostly surfaces *asking* prices; RentCast is built
+on public records, so nearly every row it returns is a closed sale. It feeds the
+forest the signal the forest already trusts most, and it covers off-market
+homes, which is the case this app exists to handle.
+
+The tradeoff is recency. RentCast returns whatever the *last* recorded sale was,
+which may be decades old, and the model has no time dimension — a 2009 price
+would be learned as if it closed today. So the provider drops sales older than
+`RENTCAST_MAX_SALE_AGE_DAYS` (default 3 years). Widen it in thin markets where
+comps are scarce; tighten it where prices move fast.
+
+### Sale history and the repeat-sales index
+
+RentCast also returns a `history` object per property — every recorded
+transaction, not just the last one. Each comp's prior sales appear under its
+address in the results table, and the full list is in the JSON API as
+`sale_history`.
+
+That history buys something better than a display detail. When one home sells
+twice, the ratio of the two prices measures appreciation *with the house held
+constant* — same lot, same street, largely the same structure — so it needs no
+model to interpret. `trends.py` collects those matched pairs across the
+neighborhood, takes the median annualized rate, and uses it to restate old sale
+prices in today's dollars. It is the Case-Shiller/FHFA repeat-sales method at
+neighborhood scale, computed from data the app already fetched.
+
+Turn it on with `TIME_ADJUST_ENABLED=1`. Two things then change: the provider
+keeps sales back to `TIME_ADJUST_MAX_SALE_AGE_DAYS` (10 years) instead of 3,
+and every stale price is marked to market before the forest sees it. The
+results page states the rate it used and shows the original price beside each
+restated one, so nothing is silently rewritten.
+
+**What it cannot see.** A home renovated between sales looks like appreciation;
+a distressed sale followed by a flip looks like a boom. Neither is modeled.
+They're excluded by holding period (`TIME_ADJUST_MIN_HOLD_YEARS`) and a rate cap
+(`TIME_ADJUST_MAX_ANNUAL_RATE`), the median resists what survives those, and
+below `TIME_ADJUST_MIN_PAIRS` matched pairs the index refuses to produce a
+number at all rather than report a noisy one. Restated prices also carry the
+index's uncertainty, so `sample_weights` trusts them in proportion to how far
+they were moved.
 
 The UI always states which provider produced the numbers, so a simulated
 estimate can never be mistaken for a real one. Swapping in a different vendor
 (ATTOM, Redfin partner feeds, a local MLS export) means writing one class that
-implements `fetch_subject` and `fetch_nearby` in `zestimate/providers/`.
+implements `fetch_subject` and `fetch_nearby` in `zestimate/providers/` —
+`rentcast.py` is the shortest example to copy.
 
 Geocoding uses **Nominatim** (OpenStreetMap), which is free and permits ~1
 request/second with a descriptive `User-Agent`. Results are cached on disk in
@@ -140,7 +190,8 @@ curl "http://127.0.0.1:5000/api/estimate?address=410+Terry+Ave+N,+Seattle,+WA+98
 ```
 
 Returns the subject, the estimate with its range and accuracy metrics, feature
-importances, and the full comparable set as JSON. Accepts the same optional
+importances, and the full comparable set as JSON — each comp carrying its
+`sale_history`, and a top-level `price_trend` when time adjustment applied. Accepts the same optional
 refinement parameters as the web form (`sqft`, `beds`, `baths`, `lot_sqft`,
 `year_built`, `home_type`).
 
@@ -156,14 +207,16 @@ zestimate/
   model.py                   Feature build, random forest, Estimate
   comps.py                   Similarity scoring, comp selection
   service.py                 Pipeline: address -> ValuationReport
+  trends.py                  Repeat-sales index, time adjustment
   viz.py                     SVG chart geometry
   providers/
     base.py                  Property + PropertyProvider interface
     synthetic.py             Offline deterministic provider
+    rentcast.py              Public-records provider (recorded sales)
     rapidapi.py              Live licensed-API provider
 templates/                   base / index / result
 static/style.css             Light + dark, no JS, no CDN
-tests/                       28 tests
+tests/                       68 tests
 Dockerfile                   Production image (gunicorn)
 docker-compose.yml           App + Caddy, persistent cache volume
 Caddyfile                    TLS + reverse proxy for wolfatthegate.com
@@ -182,7 +235,8 @@ All optional; see `.env.example` for the full list with defaults.
 | Variable | Default | Purpose |
 |---|---|---|
 | `ZESTIMATE_PROVIDER` | `auto` | `auto`, `rapidapi`, or `synthetic` |
-| `RAPIDAPI_KEY` | — | Enables live data |
+| `RENTCAST_API_KEY` | — | Enables live data from public records |
+| `RAPIDAPI_KEY` | — | Enables live data from a Zillow data API |
 | `SEARCH_RADIUS_MI` | `2.0` | Initial comp search radius |
 | `MIN_TRAINING_ROWS` | `12` | Below this, the radius expands |
 | `N_COMPS_SHOWN` | `8` | Comps displayed (spec range: 5–10) |
@@ -191,6 +245,13 @@ All optional; see `.env.example` for the full list with defaults.
 | `RF_N_ESTIMATORS` | `400` | Trees in the forest |
 | `RF_MIN_SAMPLES_LEAF` | `2` | Leaf size floor |
 | `RF_RANDOM_STATE` | `42` | Fixed, so results are reproducible |
+| `RENTCAST_MAX_SALE_AGE_DAYS` | `1095` | Ignore sales older than this; `0` disables |
+| `TIME_ADJUST_ENABLED` | `0` | `1` restates old sales in today's dollars |
+| `TIME_ADJUST_MAX_SALE_AGE_DAYS` | `3650` | Sale window once adjustment is on |
+| `TIME_ADJUST_MIN_PAIRS` | `8` | Fewer matched pairs than this ⇒ no adjustment |
+| `TIME_ADJUST_MIN_HOLD_YEARS` | `0.75` | Shorter holds are flips, not market movement |
+| `TIME_ADJUST_MAX_ANNUAL_RATE` | `0.35` | Pairs implying more are renovations |
+| `TIME_ADJUST_MAX_FACTOR` | `2.0` | Cap on any single price restatement |
 | `FLASK_PORT` | `5000` | Change this on macOS — see above |
 | `FLASK_HOST` | `127.0.0.1` | Set `0.0.0.0` to expose on your network |
 | `FLASK_DEBUG` | `0` | `1` enables auto-reload |

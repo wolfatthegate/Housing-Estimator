@@ -191,13 +191,25 @@ def build_matrix(comps: list, origin: GeoPoint) -> tuple:
     return X, y
 
 
+def _restatement_weight(prop: Property) -> float:
+    """A price carried forward by the trend index inherits its uncertainty.
+
+    An as-reported price scores 1.0. The penalty grows with the size of the
+    restatement, not the age of the sale, because a ten-year-old sale in a flat
+    market has been changed very little and deserves nearly full weight.
+    """
+    if not prop.is_time_adjusted or prop.time_adjust_factor <= 0:
+        return 1.0
+    return 1.0 / (1.0 + abs(math.log(prop.time_adjust_factor)))
+
+
 def sample_weights(comps: list) -> np.ndarray:
     """Closer homes and actual closings carry more weight than distant asks."""
     w = []
     for c in comps:
         proximity = 1.0 / (1.0 + c.distance_mi) ** 1.5
         basis = {"sold": 1.0, "listed": 0.72, "estimate": 0.5}.get(c.price_basis, 0.6)
-        w.append(proximity * basis)
+        w.append(proximity * basis * _restatement_weight(c))
     arr = np.array(w, dtype=float)
     return arr / arr.mean() if arr.mean() > 0 else np.ones(len(comps))
 
