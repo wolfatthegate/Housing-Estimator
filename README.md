@@ -219,7 +219,7 @@ static/style.css             Light + dark, no JS, no CDN
 tests/                       68 tests
 Dockerfile                   Production image (gunicorn)
 docker-compose.yml           App + Caddy, persistent cache volume
-deploy/housing-estimator.caddy  Site block for the shared Caddy
+deploy/                      systemd unit + shared-Caddy site block
 .github/workflows/deploy.yml Redeploy on push to main
 ```
 
@@ -260,7 +260,7 @@ All optional; see `.env.example` for the full list with defaults.
 
 ## Deployment
 
-Live at <https://housing.wolfatthegate.com>, sharing an EC2 instance with
+Live at <https://housing.wolfatthegate.com>, sharing a t3.micro with
 another app. Pushing to `main` rebuilds and restarts it — nothing to run by
 hand.
 
@@ -282,24 +282,70 @@ running, the marginal cost of this app is **$0**.
 
 ### How it shares the box
 
-The instance already serves `dentai-demo.wolfatthegate.com` through Caddy. A
-second Caddy would fight it for ports 80 and 443 and take that site down, so
-this app runs **no proxy of its own**:
+The instance is a **t3.micro (1 GB)** already serving
+`dentai-demo.wolfatthegate.com` through Caddy. Two consequences shape this
+setup:
+
+- **No second Caddy.** It would fight the running one for ports 80 and 443.
+  gunicorn binds `127.0.0.1:8000` and the shared Caddy proxies to it.
+- **No Docker.** `dockerd` plus `containerd` cost ~100 MiB resident, which is
+  10% of this box, and building an image on it would spike memory hard enough
+  to disturb the other site. gunicorn runs from a venv under systemd instead.
 
 ```
               :443  ┌─────────────────┐
    internet ───────▶│  Caddy (shared) │
                     └────────┬────────┘
              dentai-demo ────┤
-             housing ────────┴──▶ 127.0.0.1:8000  ──▶ gunicorn (container)
+             housing ────────┴──▶ 127.0.0.1:8000  ──▶ gunicorn (systemd)
 ```
 
-`docker-compose.yml` binds the container to loopback only. The site block in
-`deploy/housing-estimator.caddy` is what routes the hostname to it.
+`Dockerfile` and `docker-compose.yml` are kept for local containerized runs and
+for hosts with room to spare; production does not use them.
 
 ### One-time setup
 
-1. **Add the site block** to the shared Caddy and reload it:
+Ubuntu 24.04's system Python is 3.12, and every pinned dependency publishes a
+`cp312` manylinux wheel, so nothing compiles.
+
+1. **Swap first.** 1 GB is tight, and `pip install` of numpy plus scikit-learn
+   is the peak. Without swap it can be OOM-killed — and the kernel may pick the
+   *other* app as its victim.
+
+   ```bash
+   sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+   sudo mkswap /swapfile && sudo swapon /swapfile
+   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+   ```
+
+2. **Clone and build the venv:**
+
+   ```bash
+   sudo apt-get update && sudo apt-get install -y git python3-venv
+   git clone https://github.com/wolfatthegate/Housing-Estimator.git ~/Housing-Estimator
+   cd ~/Housing-Estimator && python3 -m venv venv
+   ./venv/bin/pip install -r requirements.txt
+   cp .env.example .env    # add RENTCAST_API_KEY
+   ```
+
+3. **Install the service:**
+
+   ```bash
+   sudo cp deploy/housing-estimator.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now housing-estimator
+   systemctl is-active housing-estimator
+   ```
+
+4. **Let CI restart it** without a password:
+
+   ```bash
+   echo 'ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl restart housing-estimator' \
+     | sudo tee /etc/sudoers.d/housing-estimator
+   sudo chmod 440 /etc/sudoers.d/housing-estimator
+   ```
+
+5. **Add the Caddy site block** and reload:
 
    ```bash
    sudo mkdir -p /etc/caddy/sites
@@ -309,24 +355,18 @@ this app runs **no proxy of its own**:
    sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
    ```
 
-2. **Point DNS** at the instance: a Route 53 `A` record for
-   `housing.wolfatthegate.com`. Caddy issues the certificate on first request.
-3. **Write `~/Housing-Estimator/.env`** from `.env.example`. It is gitignored
-   and never enters the image — `docker-compose.yml` reads it at runtime.
-4. **Add GitHub secrets** (Settings → Secrets → Actions): `EC2_HOST`,
-   `EC2_USER` (`ubuntu`), and `EC2_SSH_KEY` (the full private key).
+   Validate before reloading: a syntax error plus a reload takes the other site
+   down with it.
+
+6. **Point DNS** — a Route 53 `A` record for `housing.wolfatthegate.com`.
+7. **Add GitHub secrets:** `EC2_HOST`, `EC2_USER` (`ubuntu`), `EC2_SSH_KEY`.
 
 ### Notes
 
-Check free memory before the first build. numpy and scikit-learn are large, and
-an OOM during `docker build` on a shared box can disturb the *other* app, not
-just this one. If under ~1.5 GB free, add swap first:
-
-```bash
-sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
-sudo mkswap /swapfile && sudo swapon /swapfile
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-```
+The unit sets `MemoryHigh=380M` and `MemoryMax=450M`. On a shared 1 GB box that
+matters: without a cap, a pathological query training a large forest could push
+the kernel into killing whichever process it likes, including the other site's.
+With one, this service is the only thing at risk.
 
 Gunicorn runs **one worker with four threads** on purpose. The Nominatim
 throttle in `geo.py` is a module-level global, so a second worker process would

@@ -24,5 +24,12 @@ jobs:
             cd ~/Housing-Estimator
             git fetch --prune origin
             git reset --hard origin/main
-            docker compose up -d --build
-            docker image prune -f
+            # .env is untracked, so reset --hard leaves it alone.
+            test -d venv || python3 -m venv venv
+            ./venv/bin/pip install --quiet --upgrade pip
+            ./venv/bin/pip install --quiet -r requirements.txt
+            sudo systemctl restart housing-estimator
+            sleep 3
+            systemctl is-active --quiet housing-estimator \
+              || { journalctl -u housing-estimator -n 40 --no-pager; exit 1; }
+            curl -fsS -o /dev/null http://127.0.0.1:8000/ && echo "deploy OK"
