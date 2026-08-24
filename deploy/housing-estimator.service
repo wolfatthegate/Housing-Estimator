@@ -1,0 +1,41 @@
+# Production unit for the shared box. Install to /etc/systemd/system/.
+#
+# No Docker here on purpose: this instance runs Caddy natively and has 1 GB of
+# RAM, so a container daemon would cost ~100 MiB for no benefit. gunicorn runs
+# straight out of the repo's venv.
+
+[Unit]
+Description=Housing Estimator (gunicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/Housing-Estimator
+
+# config.py calls load_dotenv(), which reads .env from WorkingDirectory. Using
+# systemd's EnvironmentFile instead would reparse it under different quoting
+# rules -- GEOCODER_USER_AGENT contains spaces and parentheses.
+ExecStart=/home/ubuntu/Housing-Estimator/venv/bin/gunicorn \
+    --bind 127.0.0.1:8000 \
+    --workers 1 --threads 4 \
+    --timeout 120 \
+    --access-logfile - \
+    app:app
+
+Restart=on-failure
+RestartSec=5
+
+# This box also serves dentai-demo. These caps mean a runaway forest gets this
+# service killed rather than the other site OOM-ed out from under its user.
+MemoryHigh=380M
+MemoryMax=450M
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

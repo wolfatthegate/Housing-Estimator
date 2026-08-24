@@ -1,0 +1,18 @@
+# Site block for the SHARED Caddy already running on this box.
+#
+# This app does NOT run its own Caddy: the instance already serves
+# dentai-demo.wolfatthegate.com, and a second Caddy would fight it for ports
+# 80 and 443 and take that site down. Instead the container listens on
+# 127.0.0.1:8000 and the existing Caddy proxies to it.
+#
+# Install by importing this file from /etc/caddy/Caddyfile:
+#     import /etc/caddy/sites/*.caddy
+# then `sudo cp` this file to /etc/caddy/sites/ and `sudo systemctl reload caddy`.
+#
+# Caddy obtains and renews the certificate automatically once the DNS A record
+# points at this instance.
+
+housing.wolfatthegate.com {
+	reverse_proxy 127.0.0.1:8000
+	encode gzip
+}
