@@ -10,23 +10,11 @@ services:
     volumes:
       # Persist the geocode cache across deploys so we don't re-hit Nominatim.
       - cache:/app/.cache
-    expose:
-      - "8000"
-
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
+    # Loopback only. TLS and virtual hosting are the shared Caddy's job --
+    # see deploy/housing-estimator.caddy. Publishing this on 0.0.0.0 would
+    # expose the app un-proxied on port 8000.
     ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - app
+      - "127.0.0.1:8000:8000"
 
 volumes:
   cache:
-  caddy_data:
-  caddy_config:

@@ -219,7 +219,7 @@ static/style.css             Light + dark, no JS, no CDN
 tests/                       68 tests
 Dockerfile                   Production image (gunicorn)
 docker-compose.yml           App + Caddy, persistent cache volume
-Caddyfile                    TLS + reverse proxy for wolfatthegate.com
+deploy/housing-estimator.caddy  Site block for the shared Caddy
 .github/workflows/deploy.yml Redeploy on push to main
 ```
 
@@ -260,17 +260,16 @@ All optional; see `.env.example` for the full list with defaults.
 
 ## Deployment
 
-Live at <https://wolfatthegate.com>, on a single EC2 instance. Pushing to `main`
-rebuilds and restarts it — there is nothing to run by hand.
+Live at <https://housing.wolfatthegate.com>, sharing an EC2 instance with
+another app. Pushing to `main` rebuilds and restarts it — nothing to run by
+hand.
 
-**This app cannot go on GitHub Pages.** Pages serves static files only, and every
-request here geocodes an address, calls out to USPS and RapidAPI, and trains a
-random forest before rendering. It needs a Python process and a place to keep
-secrets.
+**This app cannot go on GitHub Pages.** Pages serves static files only, and
+every request here geocodes an address, calls out to USPS and RapidAPI/RentCast,
+and trains a random forest before rendering. It needs a Python process and a
+place to keep secrets.
 
-### Why EC2 rather than a serverless platform
-
-Two properties of the app decide this:
+### Why a plain instance rather than a serverless platform
 
 - `geo.py` caches geocodes on disk and sleeps to honor Nominatim's ~1 req/s
   limit. Ephemeral containers throw that cache away on every deploy and rotate
@@ -278,39 +277,54 @@ Two properties of the app decide this:
 - Training 400 trees per request is CPU-bound, so a cold start on a
   scale-to-zero platform lands on the user as a multi-second wait.
 
-A small always-on box with a real disk sidesteps both.
+An always-on box with a real disk sidesteps both — and since one was already
+running, the marginal cost of this app is **$0**.
+
+### How it shares the box
+
+The instance already serves `dentai-demo.wolfatthegate.com` through Caddy. A
+second Caddy would fight it for ports 80 and 443 and take that site down, so
+this app runs **no proxy of its own**:
+
+```
+              :443  ┌─────────────────┐
+   internet ───────▶│  Caddy (shared) │
+                    └────────┬────────┘
+             dentai-demo ────┤
+             housing ────────┴──▶ 127.0.0.1:8000  ──▶ gunicorn (container)
+```
+
+`docker-compose.yml` binds the container to loopback only. The site block in
+`deploy/housing-estimator.caddy` is what routes the hostname to it.
 
 ### One-time setup
 
-1. **Launch** a `t3.micro` (free tier) with Amazon Linux 2023, and allocate an
-   Elastic IP so the address survives a stop/start. Open ports 22, 80, and 443.
-2. **Install Docker and clone**, over SSH:
+1. **Add the site block** to the shared Caddy and reload it:
 
    ```bash
-   sudo dnf install -y docker git
-   sudo systemctl enable --now docker
-   sudo usermod -aG docker ec2-user   # log out and back in
-   git clone https://github.com/wolfatthegate/Zillow-Estimate.git ~/Housing-Estimator
+   sudo mkdir -p /etc/caddy/sites
+   sudo cp deploy/housing-estimator.caddy /etc/caddy/sites/
+   grep -q 'import /etc/caddy/sites' /etc/caddy/Caddyfile \
+     || echo 'import /etc/caddy/sites/*.caddy' | sudo tee -a /etc/caddy/Caddyfile
+   sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
    ```
 
-3. **Write `~/Housing-Estimator/.env`** on the instance from `.env.example`.
-   It is gitignored and never enters the image — `docker-compose.yml` reads it
-   at runtime. This is the only copy of your secrets.
-4. **Point DNS** at the Elastic IP: `A` records for `wolfatthegate.com` and
-   `www`. Caddy then issues the certificates itself on first boot; there is no
-   ACM or load balancer in this setup.
-5. **Add GitHub secrets** under Settings → Secrets → Actions: `EC2_HOST` (the
-   Elastic IP), `EC2_USER` (`ec2-user`), and `EC2_SSH_KEY` (the full private
-   key). Then `docker compose up -d --build` once by hand to verify.
+2. **Point DNS** at the instance: a Route 53 `A` record for
+   `housing.wolfatthegate.com`. Caddy issues the certificate on first request.
+3. **Write `~/Housing-Estimator/.env`** from `.env.example`. It is gitignored
+   and never enters the image — `docker-compose.yml` reads it at runtime.
+4. **Add GitHub secrets** (Settings → Secrets → Actions): `EC2_HOST`,
+   `EC2_USER` (`ubuntu`), and `EC2_SSH_KEY` (the full private key).
 
 ### Notes
 
-`t3.micro` has 1 GB of RAM, and numpy plus scikit-learn are most of it. Add swap
-before the first build or the image build can be OOM-killed:
+Check free memory before the first build. numpy and scikit-learn are large, and
+an OOM during `docker build` on a shared box can disturb the *other* app, not
+just this one. If under ~1.5 GB free, add swap first:
 
 ```bash
-sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
-sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
 
