@@ -153,26 +153,43 @@ the location as inexact rather than failing.
 
 ### The model
 
-A `RandomForestRegressor` (400 trees) is fit per query on the local homes only.
-A neighborhood-specific model beats a global one here: a few dozen homes on the
+A random forest is many decision trees. Each tree is trained on a bootstrap
+sample of the data (rows drawn at random with replacement), and each split
+considers only a random subset of the features. Any single tree overfits, but
+averaging hundreds of trees that are only loosely correlated cancels out most
+of that noise.
+
+Here a `RandomForestRegressor` is fit per query on the local homes only — a few
+dozen up to 250 (`MAX_TRAINING_ROWS`), retrained on every request. A
+neighborhood-specific model beats a global one here: a few dozen homes on the
 same streets carry more signal about one address than a national average does,
 and it makes the result explainable — the comps shown *are* the training data.
+The code is in `zestimate/model.py`.
 
-- **Target:** `log(price)`. Home prices are right-skewed and multiplicative;
-  training on logs keeps a single mansion from dominating the fit.
-- **Features:** living area, beds, baths, lot size, age, north–south and
-  east–west offset in miles from the subject (letting the forest learn
-  micro-location), condo/townhouse flags, and sold-vs-listed.
-- **Sample weights:** `1/(1+distance)^1.5`, scaled by evidence quality — a
-  closed sale counts fully, an asking price 0.72, a provider AVM 0.5.
-- **Range:** the 10th–90th percentile of the individual trees' predictions.
-  This is an empirical spread across the ensemble, not a formal confidence
-  interval, and the UI words it that way.
-- **Reported accuracy:** k-fold cross-validated MAPE and MAE, plus out-of-bag
-  R² when there are ≥20 training homes.
-- **Guardrail:** every estimate is compared against a plain median-$/sqft
-  benchmark. If the forest diverges more than 2× in either direction, the page
-  says so instead of quietly reporting a bad number.
+- **Target:** `log(price)`. Home prices are right-skewed and effects multiply,
+  so a 10% premium is the same 10% on a $300k or a $3M house. Training on logs
+  also keeps a single mansion from dominating the fit.
+- **Features (10):** living area, beds, baths, lot size, age, condo and
+  townhouse flags, sold-vs-listed, and two location features: the north–south
+  and east–west offset in miles from the subject. The offsets let the trees
+  learn micro-location — "east of the highway is cheaper" — without it being
+  encoded by hand.
+- **Sample weights:** `1/(1+distance)^1.5`, multiplied by evidence quality — a
+  closed sale counts 1.0, an asking price 0.72, a provider AVM 0.5. Old sales
+  restated in today's dollars by the repeat-sales index are discounted further,
+  more so the larger the restatement.
+- **Settings:** 400 trees (`RF_N_ESTIMATORS`), each split considers 70% of the
+  features, and leaves need at least 2 samples (`RF_MIN_SAMPLES_LEAF`), relaxed
+  to 1 when fewer than 16 homes are available.
+- **Range:** the 10th–90th percentile of the 400 individual trees'
+  predictions. This is an empirical spread across the ensemble, not a formal
+  confidence interval, and the UI words it that way.
+- **Reported accuracy:** k-fold cross-validated MAPE and MAE, measured in
+  dollars, plus out-of-bag R² when there are ≥20 training homes. The
+  confidence badge comes from the MAPE and the sample size.
+- **Guardrail:** every estimate is compared against a plain benchmark, median
+  $/sqft × living area. If the forest comes out more than double or less than
+  half of it, the page says so instead of quietly reporting a bad number.
 
 ### Comparable selection
 
