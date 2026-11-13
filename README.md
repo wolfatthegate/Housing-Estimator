@@ -217,10 +217,10 @@ zestimate/
 templates/                   base / index / result
 static/style.css             Light + dark, no JS, no CDN
 tests/                       68 tests
-Dockerfile                   Production image (gunicorn)
-docker-compose.yml           App + Caddy, persistent cache volume
-deploy/                      systemd unit + shared-Caddy site block
-.github/workflows/deploy.yml Redeploy on push to main
+Dockerfile                   Container image (gunicorn)
+docker-compose.yml           Local container run, persistent cache volume
+deploy/                      systemd unit + Caddy site block (not yet deployed)
+.github/workflows/deploy.yml SSH redeploy (workflow disabled for now)
 ```
 
 The results page has no JavaScript and no external requests — the map and charts
@@ -255,123 +255,6 @@ All optional; see `.env.example` for the full list with defaults.
 | `FLASK_PORT` | `5000` | Change this on macOS — see above |
 | `FLASK_HOST` | `127.0.0.1` | Set `0.0.0.0` to expose on your network |
 | `FLASK_DEBUG` | `0` | `1` enables auto-reload |
-
----
-
-## Deployment
-
-Live at <https://housing.wolfatthegate.com>, sharing a t3.micro with
-another app. Pushing to `main` rebuilds and restarts it — nothing to run by
-hand.
-
-**This app cannot go on GitHub Pages.** Pages serves static files only, and
-every request here geocodes an address, calls out to USPS and RapidAPI/RentCast,
-and trains a random forest before rendering. It needs a Python process and a
-place to keep secrets.
-
-### Why a plain instance rather than a serverless platform
-
-- `geo.py` caches geocodes on disk and sleeps to honor Nominatim's ~1 req/s
-  limit. Ephemeral containers throw that cache away on every deploy and rotate
-  outbound IPs, which is exactly what a rate limiter punishes.
-- Training 400 trees per request is CPU-bound, so a cold start on a
-  scale-to-zero platform lands on the user as a multi-second wait.
-
-An always-on box with a real disk sidesteps both — and since one was already
-running, the marginal cost of this app is **$0**.
-
-### How it shares the box
-
-The instance is a **t3.micro (1 GB)** already serving
-`dentai-demo.wolfatthegate.com` through Caddy. Two consequences shape this
-setup:
-
-- **No second Caddy.** It would fight the running one for ports 80 and 443.
-  gunicorn binds `127.0.0.1:8000` and the shared Caddy proxies to it.
-- **No Docker.** `dockerd` plus `containerd` cost ~100 MiB resident, which is
-  10% of this box, and building an image on it would spike memory hard enough
-  to disturb the other site. gunicorn runs from a venv under systemd instead.
-
-```
-              :443  ┌─────────────────┐
-   internet ───────▶│  Caddy (shared) │
-                    └────────┬────────┘
-             dentai-demo ────┤
-             housing ────────┴──▶ 127.0.0.1:8000  ──▶ gunicorn (systemd)
-```
-
-`Dockerfile` and `docker-compose.yml` are kept for local containerized runs and
-for hosts with room to spare; production does not use them.
-
-### One-time setup
-
-Ubuntu 24.04's system Python is 3.12, and every pinned dependency publishes a
-`cp312` manylinux wheel, so nothing compiles.
-
-1. **Swap first.** 1 GB is tight, and `pip install` of numpy plus scikit-learn
-   is the peak. Without swap it can be OOM-killed — and the kernel may pick the
-   *other* app as its victim.
-
-   ```bash
-   sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
-   sudo mkswap /swapfile && sudo swapon /swapfile
-   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-   ```
-
-2. **Clone and build the venv:**
-
-   ```bash
-   sudo apt-get update && sudo apt-get install -y git python3-venv
-   git clone https://github.com/wolfatthegate/Housing-Estimator.git ~/Housing-Estimator
-   cd ~/Housing-Estimator && python3 -m venv venv
-   ./venv/bin/pip install -r requirements.txt
-   cp .env.example .env    # add RENTCAST_API_KEY
-   ```
-
-3. **Install the service:**
-
-   ```bash
-   sudo cp deploy/housing-estimator.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now housing-estimator
-   systemctl is-active housing-estimator
-   ```
-
-4. **Let CI restart it** without a password:
-
-   ```bash
-   echo 'ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl restart housing-estimator' \
-     | sudo tee /etc/sudoers.d/housing-estimator
-   sudo chmod 440 /etc/sudoers.d/housing-estimator
-   ```
-
-5. **Add the Caddy site block** and reload:
-
-   ```bash
-   sudo mkdir -p /etc/caddy/sites
-   sudo cp deploy/housing-estimator.caddy /etc/caddy/sites/
-   grep -q 'import /etc/caddy/sites' /etc/caddy/Caddyfile \
-     || echo 'import /etc/caddy/sites/*.caddy' | sudo tee -a /etc/caddy/Caddyfile
-   sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
-   ```
-
-   Validate before reloading: a syntax error plus a reload takes the other site
-   down with it.
-
-6. **Point DNS** — a Route 53 `A` record for `housing.wolfatthegate.com`.
-7. **Add GitHub secrets:** `EC2_HOST`, `EC2_USER` (`ubuntu`), `EC2_SSH_KEY`.
-
-### Notes
-
-The unit sets `MemoryHigh=380M` and `MemoryMax=450M`. On a shared 1 GB box that
-matters: without a cap, a pathological query training a large forest could push
-the kernel into killing whichever process it likes, including the other site's.
-With one, this service is the only thing at risk.
-
-Gunicorn runs **one worker with four threads** on purpose. The Nominatim
-throttle in `geo.py` is a module-level global, so a second worker process would
-be a second unsynchronized rate limiter. Raise `--threads` for concurrency;
-raising `--workers` needs a shared throttle first.
 
 ---
 
